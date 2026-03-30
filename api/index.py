@@ -15,7 +15,7 @@ def fetch(payload):
         r = requests.post(URL, headers=HEADERS, json=payload, timeout=20, verify=False)
         if r.status_code != 200:
             return None
-        data = json.loads(r.text)
+        data = r.json()
         return data.get("d") if "d" in data else data
     except:
         return None
@@ -35,53 +35,60 @@ def smart_get(obj, keys):
                 return res
     return None
 
+def get_user_ids(mobile):
+    res = fetch({"samagraID": "0", "MobileNo": mobile})
+    if not res:
+        return []
+    items = res if isinstance(res, list) else res.get("data", [])
+    if not items and isinstance(res, dict):
+        items = [res]
+    ids = []
+    for it in items:
+        uid = smart_get(it, ["UserID", "samagraID", "MemberID"])
+        if uid:
+            ids.append(str(uid))
+    return list(dict.fromkeys(ids))
+
+def get_full(uid):
+    res = fetch({"samagraID": str(uid)})
+    if not res:
+        return None
+    return {
+        "uid": uid,
+        "name": smart_get(res, ["MemberNameE", "Name"]),
+        "dob": smart_get(res, ["Dob", "DOB"]),
+        "gender": smart_get(res, ["Gender"]),
+        "family_id": smart_get(res, ["FamilyID"]),
+        "mobile": smart_get(res, ["MobileNo"]),
+        "address": smart_get(res, ["Address"]),
+    }
+
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             from urllib.parse import urlparse, parse_qs
             query = parse_qs(urlparse(self.path).query)
-
             mobile = query.get("mobile", [None])[0]
 
             if not mobile:
                 self.send_response(400)
                 self.end_headers()
-                self.wfile.write(json.dumps({"status": False, "msg": "mobile required"}).encode())
+                self.wfile.write(json.dumps({"status": False, "message": "mobile required"}).encode())
                 return
 
-            res = fetch({"samagraID": "0", "MobileNo": mobile})
+            uids = get_user_ids(mobile)
 
-            if not res:
+            if not uids:
                 self.send_response(200)
                 self.end_headers()
-                self.wfile.write(json.dumps({"status": False, "msg": "no data"}).encode())
+                self.wfile.write(json.dumps({"status": False, "message": "No data"}).encode())
                 return
 
-            items = res if isinstance(res, list) else res.get("data", [])
-            if not items and isinstance(res, dict):
-                items = [res]
-
             results = []
-
-            for it in items:
-                uid = smart_get(it, ["UserID", "samagraID", "MemberID"])
-                if not uid:
-                    continue
-
-                full = fetch({"samagraID": str(uid)})
-                if not full:
-                    continue
-
-                results.append({
-                    "uid": uid,
-                    "name": smart_get(full, ["MemberNameE", "Name"]),
-                    "dob": smart_get(full, ["Dob"]),
-                    "gender": smart_get(full, ["Gender"]),
-                    "family_id": smart_get(full, ["FamilyID"]),
-                    "mobile": smart_get(full, ["MobileNo"]),
-                    "address": smart_get(full, ["Address"]),
-                    "district": smart_get(full, ["DistrictName"])
-                })
+            for uid in uids:
+                data = get_full(uid)
+                if data:
+                    results.append(data)
 
             self.send_response(200)
             self.end_headers()
