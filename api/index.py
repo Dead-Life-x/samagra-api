@@ -1,12 +1,6 @@
-from flask import Flask, request, jsonify
 import requests
 import json
 
-app = Flask(__name__)
-
-# ============================================
-# 🔐 SAMAGRA CONFIG
-# ============================================
 URL = "https://samagra.gov.in/Services/CommonWebApi.svc/GetDetailsBySamagra"
 
 HEADERS = {
@@ -16,9 +10,6 @@ HEADERS = {
 }
 
 
-# ============================================
-# 🔧 COMMON FETCH
-# ============================================
 def fetch(payload):
     try:
         r = requests.post(URL, headers=HEADERS, json=payload, timeout=15)
@@ -34,9 +25,6 @@ def fetch(payload):
         return None
 
 
-# ============================================
-# 🔍 SMART SEARCH
-# ============================================
 def smart_get(obj, keys):
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -53,9 +41,6 @@ def smart_get(obj, keys):
     return None
 
 
-# ============================================
-# 📱 GET USER IDS
-# ============================================
 def get_user_ids(mobile):
     res = fetch({"samagraID": "0", "MobileNo": mobile})
 
@@ -76,9 +61,6 @@ def get_user_ids(mobile):
     return list(dict.fromkeys(ids))
 
 
-# ============================================
-# 🧠 FULL INTEL
-# ============================================
 def get_full(uid):
     res = fetch({"samagraID": str(uid)})
 
@@ -100,38 +82,23 @@ def get_full(uid):
     }
 
 
-# ============================================
-# 🏠 HOME
-# ============================================
-@app.route("/")
-def home():
-    return jsonify({
-        "status": True,
-        "message": "Samagra API Running 🚀"
-    })
-
-
-# ============================================
-# 🔥 MAIN API
-# ============================================
-@app.route("/api", methods=["GET"])
-def api():
-
+# 🔥 VERCEL HANDLER (FINAL)
+def handler(request):
     mobile = request.args.get("mobile")
 
     if not mobile:
-        return jsonify({
-            "status": False,
-            "message": "mobile required"
-        })
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"status": False, "message": "mobile required"})
+        }
 
     uids = get_user_ids(mobile)
 
     if not uids:
-        return jsonify({
-            "status": False,
-            "message": "No records found"
-        })
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"status": False, "message": "No records found"})
+        }
 
     results = []
 
@@ -140,15 +107,11 @@ def api():
         if data:
             results.append(data)
 
-    return jsonify({
-        "status": True,
-        "total": len(results),
-        "data": results
-    })
-
-
-# ============================================
-# 🚀 VERCEL HANDLER (MOST IMPORTANT)
-# ============================================
-def handler(request):
-    return app(request.environ, lambda *args: None)
+    return {
+        "statusCode": 200,
+        "body": json.dumps({
+            "status": True,
+            "total": len(results),
+            "data": results
+        })
+    }
