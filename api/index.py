@@ -1,6 +1,12 @@
-import json
+from flask import Flask, request, jsonify
 import requests
+import json
 
+app = Flask(__name__)
+
+# ============================================
+# 🔐 SAMAGRA CONFIG
+# ============================================
 URL = "https://samagra.gov.in/Services/CommonWebApi.svc/GetDetailsBySamagra"
 
 HEADERS = {
@@ -9,16 +15,28 @@ HEADERS = {
     "Authorization": "Basic c2FtYWdyYUFwaTpzYW1hZ3JhQDEyMw==",
 }
 
+
+# ============================================
+# 🔧 COMMON FETCH
+# ============================================
 def fetch(payload):
     try:
-        r = requests.post(URL, headers=HEADERS, json=payload, timeout=10)
+        r = requests.post(URL, headers=HEADERS, json=payload, timeout=15)
         if r.status_code != 200:
             return None
-        data = r.json()
-        return data.get("d") if "d" in data else data
-    except Exception as e:
-        return {"error": str(e)}
 
+        text = r.content.decode("utf-8-sig", errors="ignore").strip()
+        data = json.loads(text)
+
+        return data.get("d") if "d" in data else data
+
+    except:
+        return None
+
+
+# ============================================
+# 🔍 SMART SEARCH
+# ============================================
 def smart_get(obj, keys):
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -34,59 +52,103 @@ def smart_get(obj, keys):
                 return res
     return None
 
+
+# ============================================
+# 📱 GET USER IDS
+# ============================================
+def get_user_ids(mobile):
+    res = fetch({"samagraID": "0", "MobileNo": mobile})
+
+    if not res:
+        return []
+
+    items = res if isinstance(res, list) else res.get("data", [])
+    if not items and isinstance(res, dict):
+        items = [res]
+
+    ids = []
+
+    for it in items:
+        uid = smart_get(it, ["UserID", "samagraID", "MemberID"])
+        if uid:
+            ids.append(str(uid))
+
+    return list(dict.fromkeys(ids))
+
+
+# ============================================
+# 🧠 FULL INTEL
+# ============================================
+def get_full(uid):
+    res = fetch({"samagraID": str(uid)})
+
+    if not res:
+        return None
+
+    return {
+        "uid": uid,
+        "name": smart_get(res, ["MemberNameE", "Name", "FullName"]),
+        "name_hindi": smart_get(res, ["MemberNameH"]),
+        "dob": smart_get(res, ["Dob", "DOB"]),
+        "gender": smart_get(res, ["Gender"]),
+        "family_id": smart_get(res, ["FamilyID"]),
+        "mobile": smart_get(res, ["MobileNo"]),
+        "address": smart_get(res, ["Address"]),
+        "district": smart_get(res, ["DistrictName"]),
+        "category": smart_get(res, ["CategoryName"]),
+        "photo": smart_get(res, ["Photo"])
+    }
+
+
+# ============================================
+# 🏠 HOME
+# ============================================
+@app.route("/")
+def home():
+    return jsonify({
+        "status": True,
+        "message": "Samagra API Running 🚀"
+    })
+
+
+# ============================================
+# 🔥 MAIN API
+# ============================================
+@app.route("/api", methods=["GET"])
+def api():
+
+    mobile = request.args.get("mobile")
+
+    if not mobile:
+        return jsonify({
+            "status": False,
+            "message": "mobile required"
+        })
+
+    uids = get_user_ids(mobile)
+
+    if not uids:
+        return jsonify({
+            "status": False,
+            "message": "No records found"
+        })
+
+    results = []
+
+    for uid in uids:
+        data = get_full(uid)
+        if data:
+            results.append(data)
+
+    return jsonify({
+        "status": True,
+        "total": len(results),
+        "data": results
+    })
+
+
+# ============================================
+# 🚀 VERCEL HANDLER (MOST IMPORTANT)
+# ============================================
 def handler(request):
-    try:
-        mobile = request.args.get("mobile")
-
-        if not mobile:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"status": False, "message": "mobile required"})
-            }
-
-        res = fetch({"samagraID": "0", "MobileNo": mobile})
-
-        if not res:
-            return {
-                "statusCode": 200,
-                "body": json.dumps({"status": False, "message": "No data"})
-            }
-
-        items = res if isinstance(res, list) else res.get("data", [])
-        if not items and isinstance(res, dict):
-            items = [res]
-
-        results = []
-
-        for it in items:
-            uid = smart_get(it, ["UserID", "samagraID", "MemberID"])
-            if not uid:
-                continue
-
-            full = fetch({"samagraID": str(uid)})
-
-            if not full:
-                continue
-
-            results.append({
-                "uid": uid,
-                "name": smart_get(full, ["MemberNameE", "Name"]),
-                "dob": smart_get(full, ["Dob", "DOB"]),
-                "mobile": smart_get(full, ["MobileNo"]),
-                "address": smart_get(full, ["Address"]),
-            })
-
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "status": True,
-                "total": len(results),
-                "data": results
-            })
-        }
-
-    except Exception as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
-        }
+    return app(request.environ, lambda *args: None)
