@@ -1,4 +1,3 @@
-from http.server import BaseHTTPRequestHandler
 import json
 import requests
 
@@ -12,13 +11,13 @@ HEADERS = {
 
 def fetch(payload):
     try:
-        r = requests.post(URL, headers=HEADERS, json=payload, timeout=20, verify=False)
+        r = requests.post(URL, headers=HEADERS, json=payload, timeout=10)
         if r.status_code != 200:
             return None
         data = r.json()
         return data.get("d") if "d" in data else data
-    except:
-        return None
+    except Exception as e:
+        return {"error": str(e)}
 
 def smart_get(obj, keys):
     if isinstance(obj, dict):
@@ -35,70 +34,59 @@ def smart_get(obj, keys):
                 return res
     return None
 
-def get_user_ids(mobile):
-    res = fetch({"samagraID": "0", "MobileNo": mobile})
-    if not res:
-        return []
-    items = res if isinstance(res, list) else res.get("data", [])
-    if not items and isinstance(res, dict):
-        items = [res]
-    ids = []
-    for it in items:
-        uid = smart_get(it, ["UserID", "samagraID", "MemberID"])
-        if uid:
-            ids.append(str(uid))
-    return list(dict.fromkeys(ids))
+def handler(request):
+    try:
+        mobile = request.args.get("mobile")
 
-def get_full(uid):
-    res = fetch({"samagraID": str(uid)})
-    if not res:
-        return None
-    return {
-        "uid": uid,
-        "name": smart_get(res, ["MemberNameE", "Name"]),
-        "dob": smart_get(res, ["Dob", "DOB"]),
-        "gender": smart_get(res, ["Gender"]),
-        "family_id": smart_get(res, ["FamilyID"]),
-        "mobile": smart_get(res, ["MobileNo"]),
-        "address": smart_get(res, ["Address"]),
-    }
+        if not mobile:
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"status": False, "message": "mobile required"})
+            }
 
-class handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        try:
-            from urllib.parse import urlparse, parse_qs
-            query = parse_qs(urlparse(self.path).query)
-            mobile = query.get("mobile", [None])[0]
+        res = fetch({"samagraID": "0", "MobileNo": mobile})
 
-            if not mobile:
-                self.send_response(400)
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": False, "message": "mobile required"}).encode())
-                return
+        if not res:
+            return {
+                "statusCode": 200,
+                "body": json.dumps({"status": False, "message": "No data"})
+            }
 
-            uids = get_user_ids(mobile)
+        items = res if isinstance(res, list) else res.get("data", [])
+        if not items and isinstance(res, dict):
+            items = [res]
 
-            if not uids:
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(json.dumps({"status": False, "message": "No data"}).encode())
-                return
+        results = []
 
-            results = []
-            for uid in uids:
-                data = get_full(uid)
-                if data:
-                    results.append(data)
+        for it in items:
+            uid = smart_get(it, ["UserID", "samagraID", "MemberID"])
+            if not uid:
+                continue
 
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(json.dumps({
+            full = fetch({"samagraID": str(uid)})
+
+            if not full:
+                continue
+
+            results.append({
+                "uid": uid,
+                "name": smart_get(full, ["MemberNameE", "Name"]),
+                "dob": smart_get(full, ["Dob", "DOB"]),
+                "mobile": smart_get(full, ["MobileNo"]),
+                "address": smart_get(full, ["Address"]),
+            })
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps({
                 "status": True,
                 "total": len(results),
                 "data": results
-            }).encode())
+            })
+        }
 
-        except Exception as e:
-            self.send_response(500)
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": str(e)}).encode())
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)})
+        }
